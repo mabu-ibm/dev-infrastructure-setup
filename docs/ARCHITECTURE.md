@@ -5,10 +5,35 @@
 This infrastructure consists of two AlmaLinux 10 hosts providing a complete CI/CD pipeline with container orchestration.
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                     Development Infrastructure                   │
-└─────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        Development Infrastructure                            │
+└─────────────────────────────────────────────────────────────────────────────┘
 
+┌──────────────────────────┐
+│   Developer Workstation  │
+│      (MacBook Pro)       │
+│                          │
+│  ┌────────────────────┐  │
+│  │    IBM Bob AI      │  │
+│  │                    │  │
+│  │  - Code Assistant  │  │
+│  │  - Chat Interface  │  │
+│  │  - Code Generation │  │
+│  │  - Documentation   │  │
+│  └─────────┬──────────┘  │
+│            │              │
+│  ┌─────────▼──────────┐  │
+│  │   VS Code / IDE    │  │
+│  │                    │  │
+│  │  - Source Code     │  │
+│  │  - Bob Chat Sync   │  │
+│  │  - Git Integration │  │
+│  └─────────┬──────────┘  │
+│            │              │
+└────────────┼──────────────┘
+             │ git push
+             │ (code + chat history)
+             ▼
 ┌──────────────────────────┐         ┌──────────────────────────┐
 │   almabuild (Build Host) │         │  almak3s (K8s Host)      │
 │                          │         │                          │
@@ -19,31 +44,159 @@ This infrastructure consists of two AlmaLinux 10 hosts providing a complete CI/C
 │  └────────────────────┘  │         │  │  - Control Plane   │  │
 │           │              │         │  │  - Worker Node     │  │
 │  ┌────────▼───────────┐  │         │  │  - Container       │  │
-│  │      Gitea         │  │         │  │    Runtime         │  │
-│  │                    │  │         │  └────────────────────┘  │
-│  │  - Git Repos       │  │         │           │              │
+│  │      Gitea         │◄─┼─────────┼──│    Runtime         │  │
+│  │                    │  │  Webhook│  └────────────────────┘  │
+│  │  - Git Repos       │  │  Trigger│           │              │
 │  │  - Container       │  │         │  ┌────────▼───────────┐  │
 │  │    Registry        │  │         │  │   Deployments      │  │
 │  │  - SQLite/MySQL    │  │         │  │                    │  │
 │  │  - Web UI :3000    │  │         │  │  - Applications    │  │
 │  │  - SSH :2222       │  │         │  │  - Services        │  │
-│  └────────────────────┘  │         │  │  - Ingress         │  │
-│           │              │         │  └────────────────────┘  │
-│  ┌────────▼───────────┐  │         │                          │
-│  │  Gitea Actions     │  │         │                          │
-│  │     Runner         │  │         │                          │
-│  │                    │  │         │                          │
-│  │  - CI/CD Pipeline  │  │         │                          │
-│  │  - Build Jobs      │  │         │                          │
-│  │  - Docker Build    │  │         │                          │
-│  │  - Image Push      │◄─┼─────────┼──────────────────────────┤
-│  └────────────────────┘  │         │      Deploy Trigger      │
-│                          │         │                          │
+│  │  - Chat History    │  │         │  │  - Ingress         │  │
+│  └────────┬───────────┘  │         │  └────────▲───────────┘  │
+│           │ webhook      │         │           │              │
+│  ┌────────▼───────────┐  │         │           │              │
+│  │  Gitea Actions     │  │         │           │              │
+│  │     Runner         │  │         │           │              │
+│  │                    │  │         │           │              │
+│  │  1. Checkout Code  │  │         │           │              │
+│  │  2. Build Image    │  │         │           │              │
+│  │  3. Run Tests      │  │         │           │              │
+│  │  4. Push to        │  │         │           │              │
+│  │     Registry       │  │         │           │              │
+│  │  5. Deploy to K8s  │──┼─────────┼───────────┘              │
+│  └────────────────────┘  │         │    kubectl rollout       │
+│                          │         │    restart deployment    │
 └──────────────────────────┘         └──────────────────────────┘
-         │                                      ▲
-         │                                      │
-         └──────────────────────────────────────┘
-                    Git Push / Image Push
+```
+
+## Complete Development Workflow
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Development Workflow                          │
+└─────────────────────────────────────────────────────────────────┘
+
+1. Developer + Bob AI
+   ┌──────────────────────────────────────────────────────────┐
+   │ Developer: "I need to add a new feature"                 │
+   │ Bob: Generates code, documentation, tests                │
+   │ Developer: Reviews and refines with Bob                  │
+   │ Bob: Updates code based on feedback                      │
+   │ Chat history automatically synced to repository          │
+   └──────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+2. Git Commit & Push
+   ┌──────────────────────────────────────────────────────────┐
+   │ git add .                                                │
+   │ git commit -m "feat: Add new feature (developed with Bob)"│
+   │ git push origin main                                     │
+   │                                                          │
+   │ Includes:                                                │
+   │ - Source code                                            │
+   │ - Bob chat history (docs/CHAT_HISTORY.md)               │
+   │ - Documentation updates                                  │
+   │ - Tests                                                  │
+   └──────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+3. Gitea Webhook Trigger
+   ┌──────────────────────────────────────────────────────────┐
+   │ Gitea detects push to main branch                       │
+   │ Triggers Gitea Actions workflow                         │
+   │ Webhook sent to Actions Runner                          │
+   └──────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+4. CI/CD Pipeline (Actions Runner)
+   ┌──────────────────────────────────────────────────────────┐
+   │ Step 1: Checkout code from Gitea                        │
+   │ Step 2: Build Docker image                              │
+   │         docker build -t app:${COMMIT_SHA} .             │
+   │ Step 3: Run automated tests                             │
+   │         docker run app:${COMMIT_SHA} npm test           │
+   │ Step 4: Push image to Gitea registry                    │
+   │         docker push almabuild:3000/user/app:latest      │
+   │ Step 5: Deploy to Kubernetes                            │
+   │         kubectl set image deployment/app                │
+   │         kubectl rollout restart deployment/app          │
+   └──────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+5. Kubernetes Deployment
+   ┌──────────────────────────────────────────────────────────┐
+   │ K3s pulls new image from Gitea registry                 │
+   │ Creates new pods with updated image                     │
+   │ Performs rolling update (zero downtime)                 │
+   │ Old pods terminated after new pods ready                │
+   │ Service routes traffic to new pods                      │
+   └──────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+6. Application Running
+   ┌──────────────────────────────────────────────────────────┐
+   │ Application accessible via ingress                       │
+   │ Monitoring and logging active                           │
+   │ Ready for next development cycle                        │
+   └──────────────────────────────────────────────────────────┘
+```
+
+## Bob AI Integration Workflow
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│              Bob AI Development Cycle                            │
+└─────────────────────────────────────────────────────────────────┘
+
+Developer Workstation (MacBook Pro)
+│
+├─ IBM Bob AI Assistant
+│  │
+│  ├─ Code Generation
+│  │  └─ Creates: Source code, tests, documentation
+│  │
+│  ├─ Code Review
+│  │  └─ Analyzes: Code quality, best practices, security
+│  │
+│  ├─ Documentation
+│  │  └─ Generates: README, API docs, architecture diagrams
+│  │
+│  └─ Chat History
+│     └─ Syncs to: docs/CHAT_HISTORY.md
+│
+├─ VS Code / IDE
+│  │
+│  ├─ Source Code
+│  │  └─ Files: *.js, *.py, *.go, etc.
+│  │
+│  ├─ Bob Chat Sync
+│  │  └─ Auto-saves: Conversation history
+│  │
+│  └─ Git Integration
+│     └─ Commits: Code + Chat history
+│
+└─ Git Push
+   │
+   └─ Pushes to Gitea
+      │
+      ├─ Source code
+      ├─ Bob chat history
+      ├─ Documentation
+      └─ Tests
+      
+      ▼
+      
+   Triggers CI/CD Pipeline
+      │
+      ├─ Build Docker image
+      ├─ Run tests
+      ├─ Push to registry
+      └─ Deploy to K8s
+      
+      ▼
+      
+   Application Running on K8s
 ```
 
 ## Components
