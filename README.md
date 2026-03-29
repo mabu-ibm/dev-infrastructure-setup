@@ -1,416 +1,392 @@
 # Development Infrastructure Setup
 
-Complete infrastructure setup for CI/CD pipeline with Gitea and Kubernetes on AlmaLinux 10.
+Complete CI/CD infrastructure setup with Gitea, Docker, K3s, and automated deployments on AlmaLinux 10.
 
 ## 🚀 Quick Start
 
-Get your infrastructure running in 30 minutes:
+**New to this project?** Start here:
 
-```bash
-# On almabuild host
-sudo ./vm-setup/fix-docker-almalinux.sh
-sudo ./vm-setup/install-gitea-almalinux.sh
-sudo ./vm-setup/setup-gitea-actions-runner.sh
+1. **[Complete Infrastructure Guide](docs/COMPLETE_INFRASTRUCTURE_GUIDE.md)** - Step-by-step setup from scratch (⭐ **START HERE**)
+2. **[Architecture Overview](docs/ARCHITECTURE.md)** - Understand the system design
+3. **[Quick Start Guide](docs/QUICKSTART.md)** - Fast setup for experienced users
 
-# On almak3s host
-sudo ./k8s-setup/install-k3s-almalinux.sh
-```
+## 📚 Documentation Index
 
-📖 **[Read the Quick Start Guide](docs/QUICKSTART.md)**
+### Getting Started
+- **[Complete Infrastructure Guide](docs/COMPLETE_INFRASTRUCTURE_GUIDE.md)** - Master guide with everything you need
+- [Architecture Overview](docs/ARCHITECTURE.md) - System design and data flow
+- [Quick Start Guide](docs/QUICKSTART.md) - Fast setup for experienced users
 
-## 📋 Overview
+### Host Setup
+- [almabuild Setup](docs/ALMABUILD_SETUP.md) - Build server with Gitea, Docker, and CI/CD runner
+- [almak3s Setup](docs/ALMAK3S_SETUP.md) - Kubernetes cluster setup
+- [SSH Passwordless Setup](docs/SSH_PASSWORDLESS_SETUP.md) - Configure SSH keys
 
-This project provides automated setup scripts for a complete development infrastructure:
+### CI/CD and Deployment
+- [Gitea Actions Complete Setup](docs/GITEA_ACTIONS_COMPLETE_SETUP.md) - CI/CD pipeline configuration
+- [Gitea Runner Troubleshooting](docs/GITEA_RUNNER_TROUBLESHOOTING.md) - Fix common runner issues
+- [Auto Deployment Guide](docs/AUTO_DEPLOYMENT_GUIDE.md) - Automated deployment workflows
+- [Git Repository Setup](docs/GIT_REPOSITORY_SETUP.md) - Repository configuration
 
-### almabuild (Build Host)
-- **Docker** - Container runtime
-- **Gitea** - Git hosting and container registry
-- **Gitea Actions Runner** - CI/CD automation
+### Application Deployment
+- [Hello World Python Deployment](project-templates/hello-world-python/DEPLOYMENT_GUIDE.md) - Complete example application
 
-### almak3s (Kubernetes Host)
-- **K3s** - Lightweight Kubernetes distribution
-- **Traefik** - Ingress controller
-- **Local-path** - Storage provisioner
+### Reference
+- [GitOps Decision Guide](docs/GITOPS_DECISION_GUIDE.md) - Choose the right GitOps tool
+- [ArgoCD vs Flux Comparison](docs/ARGOCD_VS_FLUX_COMPARISON.md) - Detailed comparison
 
 ## 🏗️ Architecture
 
 ```
-┌──────────────────────────┐
-│   Developer Workstation  │
-│      (MacBook Pro)       │
-│                          │
-│  ┌────────────────────┐  │
-│  │    IBM Bob AI      │  │
-│  │  - Code Assistant  │  │
-│  │  - Chat Sync       │  │
-│  └─────────┬──────────┘  │
-│            │              │
-│  ┌─────────▼──────────┐  │
-│  │   VS Code / IDE    │  │
-│  │  - Source Code     │  │
-│  │  - Git Integration │  │
-│  └─────────┬──────────┘  │
-└────────────┼──────────────┘
-             │ git push
-             │ (code + chat)
-             ▼
-┌──────────────────────────┐         ┌──────────────────────────┐
-│   almabuild              │         │  almak3s                 │
-│                          │         │                          │
-│  ┌────────────────────┐  │         │  ┌────────────────────┐  │
-│  │      Docker        │  │         │  │       K3s          │  │
-│  └────────┬───────────┘  │         │  │  (Kubernetes)      │  │
-│           │              │         │  └────────┬───────────┘  │
-│  ┌────────▼───────────┐  │         │           │              │
-│  │      Gitea         │◄─┼─────────┼──│                    │  │
-│  │  - Git Repos       │  │  Webhook│  ┌────────▼───────────┐  │
-│  │  - Registry        │  │  Trigger│  │   Deployments      │  │
-│  │  - Actions         │  │         │  │  - Applications    │  │
-│  │  - Chat History    │  │         │  │  - Services        │  │
-│  └────────┬───────────┘  │         │  └────────▲───────────┘  │
-│           │ webhook      │         │           │              │
-│  ┌────────▼───────────┐  │         │           │              │
-│  │  Actions Runner    │  │         │           │              │
-│  │  1. Build Image    │  │         │           │              │
-│  │  2. Run Tests      │  │         │           │              │
-│  │  3. Push Registry  │  │         │           │              │
-│  │  4. Deploy K8s     │──┼─────────┼───────────┘              │
-│  └────────────────────┘  │         │    kubectl rollout       │
-└──────────────────────────┘         └──────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                     almabuild (Build Host)                   │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
+│  │    Gitea     │  │    Docker    │  │ Gitea Runner │      │
+│  │  + Registry  │  │              │  │   + kubectl  │      │
+│  │  Port 3000   │  │              │  │              │      │
+│  └──────────────┘  └──────────────┘  └──────────────┘      │
+└────────────────────────────┬─────────────────────────────────┘
+                             │
+                             │ Remote kubectl (6443)
+                             ▼
+┌─────────────────────────────────────────────────────────────┐
+│                     almak3s (K3s Host)                       │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │                    K3s Cluster                        │   │
+│  │  ┌────────────┐  ┌────────────┐  ┌────────────┐     │   │
+│  │  │   Pod 1    │  │   Pod 2    │  │  Service   │     │   │
+│  │  │  App:8080  │  │  App:8080  │  │ NodePort   │     │   │
+│  │  └────────────┘  └────────────┘  │  :30xxx    │     │   │
+│  │                                   └────────────┘     │   │
+│  └──────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-📖 **[View Full Architecture](docs/ARCHITECTURE.md)**
+### Data Flow
 
-## 📚 Documentation
+```
+Developer (MacBook)
+    ↓ git push
+Gitea (almabuild)
+    ↓ webhook
+Gitea Actions Runner (almabuild)
+    ↓ build & test
+Docker Image → Gitea Registry
+    ↓ kubectl apply
+K3s Cluster (almak3s)
+    ↓ pull image
+Running Application
+```
 
-### Getting Started
-- **[Quick Start Guide](docs/QUICKSTART.md)** - 30-minute setup
-- **[Architecture Overview](docs/ARCHITECTURE.md)** - System design and components
+## 🎯 What This Project Provides
 
-### Host Setup Guides
-- **[almabuild Setup](docs/ALMABUILD_SETUP.md)** - Docker, Gitea, Actions Runner
-- **[almak3s Setup](docs/ALMAK3S_SETUP.md)** - K3s Kubernetes cluster
+### Infrastructure Components
 
-### Advanced Topics
-- **[Auto Deployment Guide](docs/AUTO_DEPLOYMENT_GUIDE.md)** - Automatic pod updates on new images
-- **[SSH Passwordless Setup](docs/SSH_PASSWORDLESS_SETUP.md)** - SSH key configuration
-- **[Complete Setup Guide](docs/COMPLETE_SETUP_GUIDE.md)** - Detailed walkthrough
+✅ **Gitea** - Self-hosted Git service with integrated container registry  
+✅ **Gitea Actions** - CI/CD automation (GitHub Actions compatible)  
+✅ **Docker** - Container runtime and image building  
+✅ **K3s** - Lightweight Kubernetes for application deployment  
+✅ **Automated Pipeline** - Push code → Build → Test → Deploy  
 
-## 🛠️ Installation Scripts
+### Automation Scripts
 
-### almabuild Host
+#### VM Setup (`vm-setup/`)
+- `install-gitea-almalinux.sh` - Install Gitea with SQLite/MySQL
+- `setup-gitea-actions-runner.sh` - Install and configure CI/CD runner
+- `fix-docker-almalinux.sh` - Fix Docker installation issues
+- `setup-ssh-passwordless.sh` - Configure SSH keys
 
-| Script | Purpose | Time |
-|--------|---------|------|
-| `vm-setup/fix-docker-almalinux.sh` | Install and configure Docker | 3 min |
-| `vm-setup/install-gitea-almalinux.sh` | Install Gitea with SQLite/MySQL | 5 min |
-| `vm-setup/setup-gitea-actions-runner.sh` | Setup CI/CD runner | 7 min |
+#### K8s Setup (`k8s-setup/`)
+- `install-k3s-almalinux.sh` - Install K3s cluster
+- `install-argocd-gitea.sh` - Install ArgoCD (optional)
+- `install-flux-cd.sh` - Install Flux CD (optional)
 
-### almak3s Host
+#### Project Templates (`project-templates/`)
+- `hello-world-python/` - Complete Python Flask example with CI/CD
+- `scaffold-project.sh` - Create new projects from templates
 
-| Script | Purpose | Time |
-|--------|---------|------|
-| `k8s-setup/install-k3s-almalinux.sh` | Install K3s cluster | 10 min |
+#### MacBook Setup (`macbook-setup/`)
+- `install-prerequisites.sh` - Install development tools
+- `configure-environment.sh` - Setup environment variables
 
-### Utility Scripts
+## 📋 Prerequisites
 
-| Script | Purpose |
-|--------|---------|
-| `vm-setup/setup-ssh-passwordless.sh` | Configure SSH keys |
-| `k8s-setup/troubleshoot-k3s.sh` | K3s diagnostics |
-| `k8s-setup/fix-k3s-network.sh` | Fix network issues |
-| `k8s-setup/complete-k3s-reinstall.sh` | Clean reinstall |
+### Hardware Requirements
 
-## ✨ Features
+**almabuild (Build Host):**
+- CPU: 2+ cores
+- RAM: 4GB minimum, 8GB recommended
+- Disk: 50GB+ free space
+- OS: AlmaLinux 10
 
-### Gitea
-- ✅ Git repository hosting
-- ✅ Container registry (packages)
-- ✅ CI/CD with Gitea Actions
-- ✅ Web UI on port 3000
-- ✅ SSH access on port 2222
-- ✅ SQLite or MySQL database
-- ✅ LFS support for large files
+**almak3s (K3s Host):**
+- CPU: 2+ cores
+- RAM: 2GB minimum, 4GB recommended
+- Disk: 20GB+ free space
+- OS: AlmaLinux 10
 
-### Gitea Actions Runner
-- ✅ Automated builds on git push
-- ✅ Docker image building
-- ✅ Multi-platform support (ubuntu, almalinux)
-- ✅ Parallel job execution
-- ✅ Integration with Gitea registry
+### Network Requirements
 
-### K3s Kubernetes
-- ✅ Lightweight Kubernetes
-- ✅ Built-in ingress (Traefik)
-- ✅ Built-in load balancer (ServiceLB)
-- ✅ Local storage provisioner
-- ✅ Easy scaling and management
-- ✅ Production-ready
+- Both hosts on same network
+- Hostnames resolvable (DNS or /etc/hosts)
+- Ports open:
+  - almabuild: 3000 (Gitea), 22 (SSH)
+  - almak3s: 6443 (K3s API), 22 (SSH), 30000-32767 (NodePorts)
 
-## 🎯 Use Cases
+## 🚦 Setup Process
 
-### Development Workflow
-1. Push code to Gitea repository
-2. Gitea Actions automatically builds Docker image
-3. Image pushed to Gitea registry
-4. K3s pulls and deploys new image
-5. Application accessible via ingress
+### Phase 1: almabuild Setup (30-45 minutes)
 
-### CI/CD Pipeline
-- Automated testing on every commit
-- Container image building and scanning
-- Automated deployment to Kubernetes
-- Rollback capabilities
-- Environment-specific deployments (dev/staging/prod)
+1. Install Docker
+2. Install Gitea with SQLite/MySQL
+3. Enable Gitea Actions
+4. Install and configure Gitea Actions Runner
+5. Setup kubectl for remote K3s access
 
-### Container Management
-- Private container registry
-- Image versioning and tagging
-- Automated image cleanup
-- Security scanning integration
+**Guide:** [almabuild Setup](docs/ALMABUILD_SETUP.md)
 
-## 🔧 System Requirements
+### Phase 2: almak3s Setup (15-20 minutes)
 
-### Minimum (Development)
-- **almabuild**: 2 CPU, 4 GB RAM, 50 GB disk
-- **almak3s**: 2 CPU, 2 GB RAM, 20 GB disk
+1. Install K3s
+2. Configure firewall
+3. Setup insecure registry
+4. Create registry secret
 
-### Recommended (Production)
-- **almabuild**: 4 CPU, 8 GB RAM, 100 GB SSD
-- **almak3s**: 4 CPU, 4 GB RAM, 50 GB SSD
+**Guide:** [almak3s Setup](docs/ALMAK3S_SETUP.md)
 
-### Prerequisites
-- AlmaLinux 10 (both hosts)
-- Root/sudo access
-- Internet connectivity
-- Network connectivity between hosts
+### Phase 3: Deploy Application (10-15 minutes)
 
-## 🚦 Quick Commands
+1. Create repository in Gitea
+2. Configure secrets
+3. Push application code
+4. Watch automated deployment
 
-### Check Status
+**Guide:** [Complete Infrastructure Guide](docs/COMPLETE_INFRASTRUCTURE_GUIDE.md#phase-3-deploy-test-application)
+
+## 🔧 Usage Examples
+
+### Deploy New Application
+
 ```bash
-# almabuild
-systemctl status docker
-systemctl status gitea
-systemctl status gitea-runner
+# 1. Create repository in Gitea
+# 2. Clone template
+cd project-templates/hello-world-python
+cp -r . ~/my-new-app
 
-# almak3s
-systemctl status k3s
-kubectl get nodes
-kubectl get pods -A
+# 3. Initialize git
+cd ~/my-new-app
+git init
+git branch -M main
+
+# 4. Add remote and push
+git remote add origin http://almabuild:3000/username/my-new-app.git
+git add .
+git commit -m "Initial commit"
+git push -u origin main
+
+# 5. Watch automatic deployment in Gitea Actions tab
 ```
 
-### View Logs
+### Update Existing Application
+
 ```bash
-# almabuild
-journalctl -u gitea -f
-journalctl -u gitea-runner -f
+# Make changes
+nano app.py
 
-# almak3s
-journalctl -u k3s -f
-kubectl logs -l app=myapp -f
+# Commit and push
+git add .
+git commit -m "Update feature"
+git push
+
+# Automatic: Build → Test → Deploy
 ```
 
-### Access Services
+### Check Deployment Status
+
 ```bash
-# Gitea Web UI
-http://almabuild:3000
+# On almak3s or almabuild (with kubectl)
+kubectl get deployments
+kubectl get pods
+kubectl get services
 
-# Gitea SSH
-ssh://git@almabuild:2222
+# View logs
+kubectl logs -l app=my-app -f
 
-# K3s API
-https://almak3s:6443
-
-# Application (via ingress)
-http://almak3s
+# Access application
+curl http://almak3s:30xxx/
 ```
-
-## 🔄 Automatic Deployment
-
-When a new Docker image is built, automatically update pods in Kubernetes:
-
-```yaml
-# .gitea/workflows/deploy.yaml
-name: Build and Deploy
-on: [push]
-
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - name: Build and push
-        run: |
-          docker build -t almabuild:3000/user/app:latest .
-          docker push almabuild:3000/user/app:latest
-      - name: Restart pods
-        run: |
-          kubectl rollout restart deployment/my-app
-```
-
-📖 **[Full Auto Deployment Guide](docs/AUTO_DEPLOYMENT_GUIDE.md)**
 
 ## 🐛 Troubleshooting
 
 ### Common Issues
 
-**Docker won't start:**
+**Gitea Actions not visible:**
 ```bash
-sudo journalctl -u docker -n 100
-sudo systemctl restart docker
+sudo nano /var/lib/gitea/custom/conf/app.ini
+# Add: [actions] ENABLED = true
+sudo systemctl restart gitea
 ```
 
-**Gitea not accessible:**
+**Runner not starting:**
 ```bash
-sudo systemctl status gitea
+sudo /usr/local/bin/fix-gitea-runner.sh
+sudo systemctl restart gitea-runner
+```
+
+**ImagePullBackOff in K3s:**
+```bash
+# Check registry config
+sudo cat /etc/rancher/k3s/registries.yaml
+sudo systemctl restart k3s
+```
+
+**kubectl connection refused:**
+```bash
+# Check firewall
 sudo firewall-cmd --list-ports
-curl http://localhost:3000
+sudo firewall-cmd --permanent --add-port=6443/tcp
+sudo firewall-cmd --reload
 ```
 
-**Actions runner not picking up jobs:**
-```bash
-sudo systemctl status gitea-runner
-sudo journalctl -u gitea-runner -f
-```
+**Full troubleshooting guide:** [Gitea Runner Troubleshooting](docs/GITEA_RUNNER_TROUBLESHOOTING.md)
 
-**K3s pods not starting:**
-```bash
-kubectl get pods -A
-kubectl describe pod <pod-name>
-kubectl logs <pod-name>
-```
-
-## 📦 Project Structure
+## 📊 Project Structure
 
 ```
 dev-infrastructure-setup/
-├── docs/                          # Documentation
-│   ├── QUICKSTART.md             # Quick start guide
-│   ├── ARCHITECTURE.md           # Architecture overview
-│   ├── ALMABUILD_SETUP.md        # Build host setup
-│   ├── ALMAK3S_SETUP.md          # K8s host setup
-│   ├── AUTO_DEPLOYMENT_GUIDE.md  # Auto deployment
-│   ├── SSH_PASSWORDLESS_SETUP.md # SSH configuration
-│   └── COMPLETE_SETUP_GUIDE.md   # Detailed guide
-├── vm-setup/                      # Build host scripts
-│   ├── fix-docker-almalinux.sh   # Docker installation
-│   ├── install-gitea-almalinux.sh # Gitea installation
+├── README.md                          # This file
+├── .env.template                      # Environment variables template
+├── docs/                              # Documentation
+│   ├── COMPLETE_INFRASTRUCTURE_GUIDE.md  # ⭐ Master setup guide
+│   ├── ARCHITECTURE.md                # System architecture
+│   ├── QUICKSTART.md                  # Quick setup guide
+│   ├── ALMABUILD_SETUP.md            # Build host setup
+│   ├── ALMAK3S_SETUP.md              # K3s host setup
+│   ├── GITEA_ACTIONS_COMPLETE_SETUP.md  # CI/CD setup
+│   ├── GITEA_RUNNER_TROUBLESHOOTING.md  # Runner issues
+│   └── ...                            # Additional guides
+├── vm-setup/                          # VM setup scripts
+│   ├── install-gitea-almalinux.sh    # Gitea installation
 │   ├── setup-gitea-actions-runner.sh # Runner setup
-│   └── setup-ssh-passwordless.sh # SSH key setup
-├── k8s-setup/                     # K8s host scripts
-│   ├── install-k3s-almalinux.sh  # K3s installation
-│   ├── troubleshoot-k3s.sh       # Diagnostics
-│   ├── fix-k3s-network.sh        # Network fixes
-│   └── complete-k3s-reinstall.sh # Clean reinstall
-└── README.md                      # This file
+│   ├── fix-docker-almalinux.sh       # Docker fixes
+│   └── setup-ssh-passwordless.sh     # SSH configuration
+├── k8s-setup/                         # Kubernetes setup
+│   ├── install-k3s-almalinux.sh      # K3s installation
+│   ├── install-argocd-gitea.sh       # ArgoCD (optional)
+│   └── install-flux-cd.sh            # Flux CD (optional)
+├── project-templates/                 # Application templates
+│   └── hello-world-python/           # Python Flask example
+│       ├── app.py                    # Application code
+│       ├── Dockerfile                # Container image
+│       ├── requirements.txt          # Python dependencies
+│       ├── .gitea/workflows/         # CI/CD workflows
+│       ├── k8s/                      # Kubernetes manifests
+│       └── DEPLOYMENT_GUIDE.md       # Deployment guide
+├── macbook-setup/                     # Development machine setup
+│   ├── install-prerequisites.sh      # Install tools
+│   └── configure-environment.sh      # Environment setup
+└── bob-skill/                         # IBM Bob AI integration
+    ├── skill-handler.sh              # Skill handler
+    └── SKILL.md                      # Skill documentation
 ```
 
-## 🔐 Security
+## 🔐 Security Considerations
 
-### Best Practices
-- Use strong passwords for Gitea admin
-- Enable 2FA for admin accounts
-- Regular backups of repositories and databases
-- Keep systems updated with security patches
-- Use SSH keys instead of passwords
-- Restrict firewall to necessary ports only
-- Regular security audits
-- Monitor logs for suspicious activity
+### Production Recommendations
 
-### Firewall Configuration
+1. **Use HTTPS for Gitea**
+   - Setup reverse proxy (Nginx/Traefik)
+   - Configure Let's Encrypt certificates
+
+2. **Secure Registry**
+   - Enable TLS for container registry
+   - Use strong authentication
+
+3. **Network Security**
+   - Configure firewall rules
+   - Use VPN for remote access
+   - Implement network policies in K3s
+
+4. **Secrets Management**
+   - Use Kubernetes secrets
+   - Consider external secret management (Vault)
+   - Rotate credentials regularly
+
+5. **Access Control**
+   - Enable RBAC in K3s
+   - Use least privilege principle
+   - Audit access logs
+
+## 🔄 Maintenance
+
+### Regular Tasks
+
+**Daily:**
+- Monitor service health
+- Check disk space
+- Review logs for errors
+
+**Weekly:**
+- Update Docker images
+- Review security alerts
+- Backup Gitea data
+
+**Monthly:**
+- Update system packages
+- Update K3s version
+- Review and rotate secrets
+
+**Backup Strategy:**
 ```bash
-# almabuild
-firewall-cmd --permanent --add-port=3000/tcp  # Gitea web
-firewall-cmd --permanent --add-port=2222/tcp  # Gitea SSH
-
-# almak3s
-firewall-cmd --permanent --add-port=6443/tcp  # K8s API
-firewall-cmd --permanent --add-port=80/tcp    # HTTP
-firewall-cmd --permanent --add-port=443/tcp   # HTTPS
-```
-
-## 🔄 Updates
-
-### Update Gitea
-```bash
+# Gitea backup
 sudo systemctl stop gitea
-sudo wget -O /usr/local/bin/gitea https://dl.gitea.com/gitea/NEW_VERSION/gitea-NEW_VERSION-linux-amd64
-sudo chmod +x /usr/local/bin/gitea
+sudo tar czf gitea-backup-$(date +%Y%m%d).tar.gz /var/lib/gitea
 sudo systemctl start gitea
+
+# K3s backup
+sudo k3s etcd-snapshot save
 ```
-
-### Update K3s
-```bash
-curl -sfL https://get.k3s.io | sh -
-```
-
-### Update System
-```bash
-sudo dnf update -y
-sudo reboot
-```
-
-## 📊 Monitoring
-
-### Recommended Tools
-- **Prometheus** - Metrics collection
-- **Grafana** - Visualization
-- **Loki** - Log aggregation
-- **AlertManager** - Alerting
-
-### Basic Monitoring
-```bash
-# Resource usage
-kubectl top nodes
-kubectl top pods -A
-
-# System metrics
-htop
-df -h
-free -h
-```
-
-## 🤝 Contributing
-
-Contributions welcome! Please:
-1. Fork the repository
-2. Create a feature branch
-3. Test your changes
-4. Submit a pull request
-
-## 📝 License
-
-This project is provided as-is for educational and development purposes.
-
-## 🆘 Support
-
-- **Documentation**: Check the [docs/](docs/) directory
-- **Issues**: Review troubleshooting sections in guides
-- **Logs**: Use `journalctl` and `kubectl logs` for debugging
 
 ## 🎓 Learning Resources
 
-- [Gitea Documentation](https://docs.gitea.io/)
-- [Gitea Actions](https://docs.gitea.io/en-us/usage/actions/overview/)
+### Official Documentation
+- [Gitea Documentation](https://docs.gitea.com/)
+- [Gitea Actions](https://docs.gitea.com/usage/actions/overview)
 - [K3s Documentation](https://docs.k3s.io/)
-- [Kubernetes Documentation](https://kubernetes.io/docs/)
 - [Docker Documentation](https://docs.docker.com/)
+- [Kubernetes Documentation](https://kubernetes.io/docs/)
 
-## ✅ Success Checklist
+### Tutorials
+- [Complete Infrastructure Guide](docs/COMPLETE_INFRASTRUCTURE_GUIDE.md) - This project's master guide
+- [Hello World Python Example](project-templates/hello-world-python/DEPLOYMENT_GUIDE.md) - Working example
 
-- [ ] Docker running on almabuild
-- [ ] Gitea accessible at http://almabuild:3000
-- [ ] Gitea admin account created
-- [ ] Actions runner registered and idle
-- [ ] K3s running on almak3s
-- [ ] kubectl working
-- [ ] Test workflow executed successfully
-- [ ] Test deployment running on K3s
-- [ ] Automatic deployment configured
+## 🤝 Contributing
+
+This is a personal infrastructure setup project. Feel free to fork and adapt for your needs.
+
+## 📝 License
+
+MIT License - See LICENSE file for details
+
+## 🙏 Acknowledgments
+
+- AlmaLinux Project
+- Gitea Project
+- K3s/Rancher
+- Docker
+- Kubernetes Community
 
 ---
 
-**Made with ❤️ for DevOps automation**
+## 📞 Support
 
-*Last updated: 2026-03-27*
+For issues and questions:
+1. Check [Troubleshooting Guide](docs/GITEA_RUNNER_TROUBLESHOOTING.md)
+2. Review [Complete Infrastructure Guide](docs/COMPLETE_INFRASTRUCTURE_GUIDE.md)
+3. Check service logs: `sudo journalctl -u SERVICE_NAME -n 50`
+
+---
+
+**Created with IBM Bob AI** 🤖
+
+**Happy Building!** 🚀

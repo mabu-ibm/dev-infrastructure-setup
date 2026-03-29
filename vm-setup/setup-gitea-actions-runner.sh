@@ -129,7 +129,53 @@ EOF
 
 systemctl daemon-reload
 
-# Step 6: Display registration instructions
+# Step 6: Post-registration fix function
+log_info "Creating post-registration fix script..."
+cat > /usr/local/bin/fix-gitea-runner.sh <<'FIXEOF'
+#!/bin/bash
+# Fix Gitea Runner configuration after registration
+# This moves the .runner file to the correct location and regenerates config
+
+set -euo pipefail
+
+RUNNER_USER="gitea-runner"
+RUNNER_HOME="/var/lib/gitea-runner"
+RUNNER_WORK_DIR="/var/lib/act_runner"
+
+echo "[INFO] Fixing Gitea Runner configuration..."
+
+# Check if .runner file exists in work directory
+if [ -f "${RUNNER_WORK_DIR}/.runner" ]; then
+    echo "[INFO] Moving .runner file to ${RUNNER_HOME}..."
+    sudo mkdir -p ${RUNNER_HOME}
+    sudo mv ${RUNNER_WORK_DIR}/.runner ${RUNNER_HOME}/
+    
+    # Regenerate config in the correct location
+    echo "[INFO] Regenerating configuration..."
+    sudo -u ${RUNNER_USER} /usr/local/bin/act_runner generate-config | sudo tee ${RUNNER_HOME}/config.yaml > /dev/null
+    
+    # Set proper ownership
+    echo "[INFO] Setting ownership..."
+    sudo chown -R ${RUNNER_USER}:${RUNNER_USER} ${RUNNER_HOME}
+    
+    # Restart service
+    echo "[INFO] Restarting gitea-runner service..."
+    sudo systemctl restart gitea-runner
+    
+    echo "[SUCCESS] Gitea Runner configuration fixed!"
+    echo "[INFO] Checking status..."
+    sudo systemctl status gitea-runner --no-pager
+else
+    echo "[ERROR] .runner file not found in ${RUNNER_WORK_DIR}"
+    echo "[INFO] Please register the runner first"
+    exit 1
+fi
+FIXEOF
+
+chmod +x /usr/local/bin/fix-gitea-runner.sh
+log_info "✓ Post-registration fix script created at /usr/local/bin/fix-gitea-runner.sh"
+
+# Step 7: Display registration instructions
 log_info "============================================"
 log_info "Gitea Actions Runner Setup Complete!"
 log_info "============================================"
@@ -153,9 +199,18 @@ log_info ""
 log_info "   Or use this one-liner:"
 log_info "   cd ${RUNNER_WORK_DIR} && sudo -u ${RUNNER_USER} /usr/local/bin/act_runner register --instance http://YOUR_GITEA_URL:3000 --token YOUR_TOKEN --name build-runner-1 --labels ubuntu-latest,almalinux-latest"
 log_info ""
-log_info "6. After registration, start the service:"
+log_info "6. IMPORTANT: After registration, run the fix script:"
+log_info "   ${GREEN}sudo /usr/local/bin/fix-gitea-runner.sh${NC}"
+log_info ""
+log_info "   This will:"
+log_info "   - Move .runner file to correct location (${RUNNER_HOME})"
+log_info "   - Regenerate configuration"
+log_info "   - Set proper ownership"
+log_info "   - Restart the service"
+log_info ""
+log_info "7. Then enable and verify the service:"
 log_info "   systemctl enable gitea-runner"
-log_info "   systemctl start gitea-runner"
+log_info "   systemctl status gitea-runner"
 log_info ""
 log_info "Check status: systemctl status gitea-runner"
 log_info "View logs:    journalctl -u gitea-runner -f"
