@@ -21,6 +21,8 @@ echo ""
 GITEA_URL="${GITEA_URL:-http://almabuild:3000}"
 GITEA_USER="${GITEA_USER:-}"
 GITEA_TOKEN="${GITEA_TOKEN:-}"
+BASE_DOMAIN="${BASE_DOMAIN:-lab.allwaysbeginner.com}"
+K3S_HOSTNAME="${K3S_HOSTNAME:-almak3s.lab.allwaysbeginner.com}"
 APP_NAME="${1:-}"
 APP_TYPE="${2:-python}"
 
@@ -60,11 +62,34 @@ if [ -z "$GITEA_TOKEN" ]; then
     show_usage
 fi
 
+# Prompt for domain configuration if not set
+if [ -z "$BASE_DOMAIN" ] || [ "$BASE_DOMAIN" = "lab.allwaysbeginner.com" ]; then
+    echo -e "${YELLOW}Domain Configuration:${NC}"
+    read -p "Enter your base domain (default: lab.allwaysbeginner.com): " INPUT_DOMAIN
+    if [ -n "$INPUT_DOMAIN" ]; then
+        BASE_DOMAIN="$INPUT_DOMAIN"
+    fi
+    echo ""
+fi
+
+if [ -z "$K3S_HOSTNAME" ] || [ "$K3S_HOSTNAME" = "almak3s.lab.allwaysbeginner.com" ]; then
+    read -p "Enter your K3s hostname (default: almak3s.$BASE_DOMAIN): " INPUT_K3S
+    if [ -n "$INPUT_K3S" ]; then
+        K3S_HOSTNAME="$INPUT_K3S"
+    else
+        K3S_HOSTNAME="almak3s.$BASE_DOMAIN"
+    fi
+    echo ""
+fi
+
 echo -e "${GREEN}Configuration:${NC}"
 echo "  Gitea URL: $GITEA_URL"
 echo "  Username: $GITEA_USER"
 echo "  App Name: $APP_NAME"
 echo "  App Type: $APP_TYPE"
+echo "  Base Domain: $BASE_DOMAIN"
+echo "  K3s Hostname: $K3S_HOSTNAME"
+echo "  App URL: https://$APP_NAME.$BASE_DOMAIN"
 echo ""
 
 # Step 1: Check if repository exists
@@ -121,6 +146,36 @@ fi
 echo "Copying template from: $TEMPLATE_DIR"
 cp -r "$TEMPLATE_DIR"/* .
 cp -r "$TEMPLATE_DIR"/.gitea .
+
+# Create project .env.template
+echo "Creating project environment configuration..."
+ENV_TEMPLATE="$HOME/dev-infrastructure-setup/project-templates/project.env.template"
+if [ -f "$ENV_TEMPLATE" ]; then
+    cp "$ENV_TEMPLATE" .env.template
+    # Substitute project-specific values
+    sed -i.bak "s/\${PROJECT_NAME}/$APP_NAME/g" .env.template
+    sed -i.bak "s/\${GITEA_REGISTRY}/${GITEA_URL#http*:\/\/}/g" .env.template
+    rm -f .env.template.bak
+    echo -e "${GREEN}✓ Project .env.template created${NC}"
+else
+    echo -e "${YELLOW}⚠ Project .env.template not found, creating basic version${NC}"
+    cat > .env.template <<EOF
+# Project Environment Configuration
+CONCERT_URL=https://YOUR_INSTANCE.concert.saas.ibm.com
+CONCERT_API_KEY=YOUR_CONCERT_API_KEY
+CONCERT_INSTANCE_ID=YOUR_INSTANCE_ID
+CONCERT_APPLICATION_ID=YOUR_APPLICATION_ID
+SBOM_FORMAT=spdx-json
+SBOM_DIR=./sbom
+APP_NAME=$APP_NAME
+BASE_DOMAIN=$BASE_DOMAIN
+APP_HOSTNAME=$APP_NAME.$BASE_DOMAIN
+K3S_HOSTNAME=$K3S_HOSTNAME
+INGRESS_CLASS=traefik
+ENABLE_TLS=true
+TLS_SECRET_NAME=$APP_NAME-tls
+EOF
+fi
 
 # Customize application
 echo "Customizing application..."
@@ -234,9 +289,12 @@ echo ""
 echo "Next steps:"
 echo "  1. Watch the pipeline in Gitea Actions"
 echo "  2. Wait for deployment to complete (~3-5 minutes)"
-echo "  3. Check application: kubectl get pods -l app=$APP_NAME"
-echo "  4. Access application: kubectl port-forward service/$APP_NAME 8080:80"
+echo "  3. Setup secure HTTPS access:"
+echo "     cd $APP_NAME/k8s && ./setup-secure-https.sh"
+echo "  4. Add to /etc/hosts on your machine:"
+echo "     <K3S_IP>  $APP_NAME.$BASE_DOMAIN"
+echo "  5. Access application: https://$APP_NAME.$BASE_DOMAIN"
 echo ""
-echo -e "${GREEN}Your secure application is being deployed!${NC} 🚀"
+echo -e "${GREEN}Your secure application is being deployed!${NC} 🚀🔒"
 
 # Made with Bob

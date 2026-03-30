@@ -183,6 +183,30 @@ MacBook → Gitea → Actions Runner → Docker Build → Registry → Flux CD �
 - [ ] Observability integration
 EOF
 
+# Create project environment template
+log_step "Creating project environment template..."
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "${SCRIPT_DIR}/project.env.template" ]; then
+    cp "${SCRIPT_DIR}/project.env.template" .env.template
+    # Substitute project name
+    sed -i.bak "s/\${PROJECT_NAME}/${PROJECT_NAME}/g" .env.template
+    sed -i.bak "s/\${GITEA_REGISTRY}/${GITEA_REGISTRY:-gitea.local}/g" .env.template
+    rm -f .env.template.bak
+    log_info "✓ Project .env.template created"
+else
+    log_warn "Project .env.template not found, creating basic version"
+    cat > .env.template <<EOF
+# Project Environment Configuration
+CONCERT_URL=https://YOUR_INSTANCE.concert.saas.ibm.com
+CONCERT_API_KEY=YOUR_CONCERT_API_KEY
+CONCERT_INSTANCE_ID=YOUR_INSTANCE_ID
+CONCERT_APPLICATION_ID=YOUR_APPLICATION_ID
+SBOM_FORMAT=spdx-json
+SBOM_DIR=./sbom
+APP_NAME=${PROJECT_NAME}
+EOF
+fi
+
 # Create .gitignore
 cat > .gitignore <<EOF
 # AI Chat History (synced automatically)
@@ -193,7 +217,9 @@ cat > .gitignore <<EOF
 # Environment variables
 .env
 .env.local
-*.env
+
+# SBOM output directory
+sbom/
 
 # IDE
 .vscode/
@@ -593,15 +619,15 @@ jobs:
       - name: Log in to Gitea Registry
         uses: docker/login-action@v3
         with:
-          registry: \${{ secrets.GITEA_REGISTRY }}
-          username: \${{ secrets.GITEA_USERNAME }}
-          password: \${{ secrets.GITEA_TOKEN }}
+          registry: \${{ secrets.GIT_REGISTRY }}
+          username: \${{ secrets.GIT_USERNAME }}
+          password: \${{ secrets.GIT_TOKEN }}
 
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: \${{ secrets.GITEA_REGISTRY }}/${PROJECT_NAME}
+          images: \${{ secrets.GIT_REGISTRY }}/${PROJECT_NAME}
           tags: |
             type=ref,event=branch
             type=ref,event=pr
@@ -619,10 +645,42 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Install Syft
+        if: github.event_name != 'pull_request'
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
+
+      - name: Generate SBOM (Always)
+        if: github.event_name != 'pull_request'
+        run: |
+          IMAGE_TAG=\$(echo "\${{ steps.meta.outputs.tags }}" | head -n1)
+          syft "\${IMAGE_TAG}" --output spdx-json=sbom.json
+          echo "✓ SBOM generated successfully"
+
+      - name: Upload SBOM to Concert (Optional)
+        if: github.event_name != 'pull_request' && secrets.CONCERT_URL != ''
+        env:
+          CONCERT_URL: \${{ secrets.CONCERT_URL }}
+          CONCERT_API_KEY: \${{ secrets.CONCERT_API_KEY }}
+          CONCERT_INSTANCE_ID: \${{ secrets.CONCERT_INSTANCE_ID }}
+          CONCERT_APPLICATION_ID: \${{ secrets.CONCERT_APPLICATION_ID }}
+        run: |
+          pip install requests
+          python scripts/upload-sbom-to-concert.py sbom.json --application-id "\${CONCERT_APPLICATION_ID}"
+
+      - name: Upload SBOM artifacts
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-files
+          path: sbom.json
+          retention-days: 90
+
       - name: Update deployment
         if: github.ref == 'refs/heads/main'
         run: |
           echo "Image built and pushed successfully"
+          echo "SBOM generated and uploaded"
           echo "Flux CD will automatically deploy the new image"
 EOF
 
@@ -656,6 +714,21 @@ EOF
 
 chmod +x scripts/dev-setup.sh
 
+# Copy SBOM generation scripts
+log_step "Adding SBOM generation scripts..."
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && cd .. && pwd)"
+if [ -f "${SCRIPT_DIR}/scripts/generate-sbom.sh" ]; then
+    cp "${SCRIPT_DIR}/scripts/generate-sbom.sh" scripts/
+    chmod +x scripts/generate-sbom.sh
+    log_info "✓ SBOM generation script added"
+fi
+
+if [ -f "${SCRIPT_DIR}/scripts/upload-sbom-to-concert.py" ]; then
+    cp "${SCRIPT_DIR}/scripts/upload-sbom-to-concert.py" scripts/
+    chmod +x scripts/upload-sbom-to-concert.py
+    log_info "✓ Concert upload script added"
+fi
+
 # Install git hooks for chat sync
 log_step "Installing git hooks..."
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && cd .. && pwd)"
@@ -673,9 +746,10 @@ git commit -m "chore: initial project setup
 - ${STACK_TYPE^} application structure
 - Docker multi-stage build
 - Kubernetes manifests
-- Gitea Actions CI/CD pipeline
+- Gitea Actions CI/CD pipeline with SBOM generation
 - AI assistant context files (CLAUDE.md, BOB.md)
-- Chat sync automation"
+- Chat sync automation
+- SBOM generation and Concert integration"
 
 log_info "============================================"
 log_info "Project Created Successfully!"
