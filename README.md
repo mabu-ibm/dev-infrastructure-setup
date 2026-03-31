@@ -1,6 +1,128 @@
 # Development Infrastructure Setup
 
-Complete development infrastructure with automated CI/CD, GitOps, and SBOM generation for secure application development.
+Complete development infrastructure with automated CI/CD, GitOps, SBOM generation, and IBM Concert security integration for secure application development.
+
+## 🏛️ Architecture Overview
+
+This infrastructure consists of two AlmaLinux 10 hosts providing a complete CI/CD pipeline with container orchestration, integrated with IBM Concert for automated security scanning and vulnerability remediation.
+
+### Infrastructure Components
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        Development Infrastructure                            │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────┐
+│   Developer Workstation  │
+│      (MacBook Pro)       │
+│                          │
+│  ┌────────────────────┐  │
+│  │    IBM Bob AI      │  │
+│  │                    │  │
+│  │  - Code Assistant  │  │
+│  │  - Chat Interface  │  │
+│  │  - Code Generation │  │
+│  │  - Security Fixes  │  │
+│  └─────────┬──────────┘  │
+│            │              │
+│  ┌─────────▼──────────┐  │
+│  │   VS Code / IDE    │  │
+│  │                    │  │
+│  │  - Source Code     │  │
+│  │  - Bob Chat Sync   │  │
+│  │  - Git Integration │  │
+│  └─────────┬──────────┘  │
+│            │              │
+└────────────┼──────────────┘
+             │ git push
+             │ (code + chat history)
+             ▼
+┌──────────────────────────┐         ┌──────────────────────────┐
+│   almabuild (Build Host) │         │  almak3s (K8s Host)      │
+│                          │         │                          │
+│  ┌────────────────────┐  │         │  ┌────────────────────┐  │
+│  │      Docker        │  │         │  │       K3s          │  │
+│  │   (Container       │  │         │  │  (Kubernetes)      │  │
+│  │    Runtime)        │  │         │  │                    │  │
+│  └────────────────────┘  │         │  │  - Control Plane   │  │
+│           │              │         │  │  - Worker Node     │  │
+│  ┌────────▼───────────┐  │         │  │  - Container       │  │
+│  │      Gitea         │◄─┼─────────┼──│    Runtime         │  │
+│  │                    │  │  Webhook│  └────────────────────┘  │
+│  │  - Git Repos       │  │  Trigger│           │              │
+│  │  - Container       │  │         │  ┌────────▼───────────┐  │
+│  │    Registry        │  │         │  │   Deployments      │  │
+│  │  - Web UI :3000    │  │         │  │                    │  │
+│  │  - SSH :2222       │  │         │  │  - Applications    │  │
+│  └────────┬───────────┘  │         │  │  - Services        │  │
+│           │ webhook      │         │  │  - Ingress         │  │
+│  ┌────────▼───────────┐  │         │  └────────▲───────────┘  │
+│  │  Gitea Actions     │  │         │           │              │
+│  │     Runner         │  │         │           │              │
+│  │                    │  │         │           │              │
+│  │  1. Checkout Code  │  │         │           │              │
+│  │  2. Build Image    │  │         │           │              │
+│  │  3. Generate SBOM  │  │         │           │              │
+│  │  4. Upload Concert │  │         │           │              │
+│  │  5. Push Registry  │  │         │           │              │
+│  │  6. Deploy to K8s  │──┼─────────┼───────────┘              │
+│  └────────────────────┘  │         │    kubectl rollout       │
+│                          │         │    restart deployment    │
+└──────────────────────────┘         └──────────────────────────┘
+                                              │
+                                              │
+                                              ▼
+                                     ┌────────────────────┐
+                                     │   IBM Concert      │
+                                     │  Security Platform │
+                                     │                    │
+                                     │  - SBOM Analysis   │
+                                     │  - CVE Scanning    │
+                                     │  - Risk Assessment │
+                                     │  - Fix Generation  │
+                                     └─────────┬──────────┘
+                                               │
+                                               │ CVE Fixes
+                                               ▼
+                                     ┌────────────────────┐
+                                     │    Bob AI          │
+                                     │  Auto-Remediation  │
+                                     │                    │
+                                     │  - Retrieve CVEs   │
+                                     │  - Generate Fixes  │
+                                     │  - Create PRs      │
+                                     │  - Update Code     │
+                                     └────────────────────┘
+```
+
+### Security Feedback Loop
+
+The infrastructure implements a continuous security feedback loop:
+
+1. **Developer writes code** with Bob AI assistance
+2. **Code pushed to Gitea** triggers CI/CD pipeline
+3. **CI/CD builds image** and generates SBOM (Software Bill of Materials)
+4. **SBOM uploaded to Concert** for vulnerability analysis
+5. **Concert analyzes SBOM** and identifies CVEs with risk scores
+6. **Bob AI retrieves vulnerabilities** from Concert API
+7. **Bob AI generates fixes** automatically (dependency updates, patches)
+8. **Bob AI creates pull request** with security fixes
+9. **Developer reviews and merges** fixes
+10. **CI/CD re-runs** with fixes, new SBOM uploaded to Concert
+11. **Concert verifies** vulnerabilities are resolved
+12. **Cycle repeats** for continuous security
+
+### Key Features
+
+- **Automated SBOM Generation**: Every build generates a Software Bill of Materials
+- **Concert Integration**: Automatic vulnerability scanning and risk assessment
+- **AI-Powered Remediation**: Bob AI automatically generates security fixes
+- **Zero-Touch Security**: Vulnerabilities detected and fixed automatically
+- **Continuous Compliance**: Real-time security monitoring and reporting
+- **Developer Productivity**: Reduced manual security work with automated PRs
+
+For detailed architecture information, see [Architecture Documentation](docs/ARCHITECTURE.md).
 
 ## 🚀 Quick Start
 
