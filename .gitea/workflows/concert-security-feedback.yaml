@@ -1,0 +1,250 @@
+name: Concert Security Feedback Loop
+
+on:
+  # Run after SBOM upload
+  workflow_run:
+    workflows: ["Build with SBOM"]
+    types:
+      - completed
+  
+  # Also run on schedule (daily security check)
+  schedule:
+    - cron: '0 2 * * *'  # Daily at 2 AM
+  
+  # Manual trigger
+  workflow_dispatch:
+
+jobs:
+  fetch-vulnerabilities:
+    name: Fetch Concert Vulnerabilities
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          pip install requests
+      
+      - name: Fetch vulnerabilities from Concert
+        id: fetch_vulns
+        run: |
+          python3 scripts/fetch-concert-vulnerabilities.py \
+            --app-id "${{ secrets.CONCERT_APP_ID }}" \
+            --api-key "${{ secrets.CONCERT_API_KEY }}" \
+            --instance-id "${{ secrets.CONCERT_INSTANCE_ID }}" \
+            --output concert-vulnerabilities.json \
+            --bob-prompt bob-remediation-prompt.md
+        continue-on-error: true
+      
+      - name: Check for critical vulnerabilities
+        id: check_critical
+        run: |
+          if [ -f concert-vulnerabilities.json ]; then
+            CRITICAL=$(jq -r '.summary.critical' concert-vulnerabilities.json)
+            HIGH=$(jq -r '.summary.high' concert-vulnerabilities.json)
+            TOTAL=$(jq -r '.summary.total' concert-vulnerabilities.json)
+            
+            echo "critical=$CRITICAL" >> $GITHUB_OUTPUT
+            echo "high=$HIGH" >> $GITHUB_OUTPUT
+            echo "total=$TOTAL" >> $GITHUB_OUTPUT
+            
+            if [ "$CRITICAL" -gt 0 ] || [ "$HIGH" -gt 0 ]; then
+              echo "action_required=true" >> $GITHUB_OUTPUT
+            else
+              echo "action_required=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "action_required=false" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Upload vulnerability report as artifact
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: concert-vulnerability-report
+          path: |
+            concert-vulnerabilities.json
+            bob-remediation-prompt.md
+          retention-days: 30
+      
+      - name: Create GitHub Issue for Bob AI
+        if: steps.check_critical.outputs.action_required == 'true'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            
+            // Read Bob AI prompt
+            let bobPrompt = '';
+            try {
+              bobPrompt = fs.readFileSync('bob-remediation-prompt.md', 'utf8');
+            } catch (error) {
+              console.log('Could not read Bob prompt file');
+              return;
+            }
+            
+            // Create issue for Bob AI
+            const issue = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `🔒 Security: ${context.payload.workflow_run?.head_commit?.message || 'Vulnerabilities detected by Concert'}`,
+              body: bobPrompt,
+              labels: ['security', 'concert', 'automated-remediation', 'bob-ai']
+            });
+            
+            console.log(`Created issue #${issue.data.number} for Bob AI remediation`);
+      
+      - name: Comment on latest commit
+        if: steps.check_critical.outputs.action_required == 'true'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const critical = '${{ steps.check_critical.outputs.critical }}';
+            const high = '${{ steps.check_critical.outputs.high }}';
+            const total = '${{ steps.check_critical.outputs.total }}';
+            
+            const comment = `## 🔒 Concert Security Scan Results
+            
+            **Vulnerabilities Detected**: ${total}
+            - 🔴 Critical: ${critical}
+            - 🟠 High: ${high}
+            
+            ${critical > 0 ? '⚠️ **IMMEDIATE ACTION REQUIRED** - Critical vulnerabilities found!' : ''}
+            
+            📄 **Detailed Report**: Check the workflow artifacts for complete analysis
+            🤖 **Bob AI**: An issue has been created for automated remediation
+            
+            ### Next Steps:
+            1. Review the vulnerability report in workflow artifacts
+            2. Bob AI will analyze and create a pull request with fixes
+            3. Review and merge the security fixes
+            4. Re-run the pipeline to verify fixes
+            `;
+            
+            await github.rest.repos.createCommitComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: context.sha,
+              body: comment
+            });
+      
+      - name: Send notification (optional)
+        if: steps.check_critical.outputs.action_required == 'true'
+        run: |
+          echo "🚨 Security Alert: ${{ steps.check_critical.outputs.critical }} critical vulnerabilities found"
+          echo "📧 Notification would be sent here (configure your notification system)"
+          # Add your notification logic here (Slack, email, etc.)
+
+  trigger-bob-remediation:
+    name: Trigger Bob AI Remediation
+    needs: fetch-vulnerabilities
+    runs-on: ubuntu-latest
+    if: needs.fetch-vulnerabilities.outputs.action_required == 'true'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      
+      - name: Download vulnerability report
+        uses: actions/download-artifact@v3
+        with:
+          name: concert-vulnerability-report
+      
+      - name: Setup Bob AI environment
+        run: |
+          # Create Bob AI workspace
+          mkdir -p .bob-workspace
+          cp concert-vulnerabilities.json .bob-workspace/
+          cp bob-remediation-prompt.md .bob-workspace/
+      
+      - name: Create remediation branch
+        run: |
+          git config user.name "Bob AI Security Bot"
+          git config user.email "bob-ai@security.local"
+          
+          BRANCH_NAME="security/concert-auto-fix-$(date +%Y%m%d-%H%M%S)"
+          git checkout -b "$BRANCH_NAME"
+          
+          # Add vulnerability report to branch
+          git add .bob-workspace/
+          git commit -m "chore: Add Concert vulnerability report for Bob AI remediation
+
+          This commit includes:
+          - Vulnerability analysis from IBM Concert
+          - Bob AI remediation prompt
+          - Automated security fix request
+          
+          Bob AI will analyze these vulnerabilities and create fixes automatically."
+          
+          echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
+      
+      - name: Push remediation branch
+        run: |
+          git push origin "$BRANCH_NAME"
+      
+      - name: Create Pull Request for Bob AI
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const branchName = process.env.BRANCH_NAME;
+            
+            // Read Bob prompt for PR description
+            let bobPrompt = '';
+            try {
+              bobPrompt = fs.readFileSync('bob-remediation-prompt.md', 'utf8');
+            } catch (error) {
+              bobPrompt = 'See vulnerability report in .bob-workspace/';
+            }
+            
+            const pr = await github.rest.pulls.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: '🔒 Security: Automated fixes from Concert vulnerability scan',
+              head: branchName,
+              base: 'main',
+              body: `## 🤖 Bob AI Automated Security Remediation
+              
+              This PR is automatically created based on vulnerabilities detected by IBM Concert.
+              
+              ${bobPrompt}
+              
+              ---
+              
+              **⚠️ Important**: This PR requires Bob AI to:
+              1. Analyze the vulnerabilities in \`.bob-workspace/concert-vulnerabilities.json\`
+              2. Generate appropriate fixes (dependency updates, patches, config changes)
+              3. Commit the fixes to this branch
+              4. Request review from the development team
+              
+              **Manual Steps**:
+              1. Bob AI: Review the vulnerability report and generate fixes
+              2. Developer: Review Bob's fixes and approve
+              3. Merge this PR to apply security fixes
+              4. Pipeline will re-run and upload new SBOM to Concert
+              `,
+              draft: true
+            });
+            
+            console.log(`Created PR #${pr.data.number} for Bob AI remediation`);
+            
+            // Add labels
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pr.data.number,
+              labels: ['security', 'automated-remediation', 'bob-ai', 'concert']
+            });
+
+# Made with Bob

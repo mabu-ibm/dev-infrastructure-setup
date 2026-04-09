@@ -1,7 +1,7 @@
 #!/bin/bash
 ################################################################################
-# Docker Fix Script for AlmaLinux 10
-# Purpose: Fix Docker installation and startup issues
+# Docker Installation and Fix Script for AlmaLinux 10
+# Purpose: Install Docker (if needed) and fix Docker startup issues
 # Usage: sudo ./fix-docker-almalinux.sh
 ################################################################################
 
@@ -25,8 +25,45 @@ if [[ $EUID -ne 0 ]]; then
    exit 1
 fi
 
-log_info "Docker Fix for AlmaLinux 10"
-log_info "============================"
+log_info "Docker Installation and Fix for AlmaLinux 10"
+log_info "============================================="
+echo ""
+
+# Step 0: Check and install Docker if needed
+log_step "Step 0: Checking Docker installation..."
+if ! command -v docker &> /dev/null; then
+    log_warn "Docker not found. Installing Docker..."
+    
+    # Remove any old Docker packages
+    log_info "Removing old Docker packages (if any)..."
+    dnf remove -y docker \
+                  docker-client \
+                  docker-client-latest \
+                  docker-common \
+                  docker-latest \
+                  docker-latest-logrotate \
+                  docker-logrotate \
+                  docker-engine \
+                  podman \
+                  runc 2>/dev/null || true
+    
+    # Install required packages
+    log_info "Installing required packages..."
+    dnf install -y dnf-plugins-core
+    
+    # Add Docker repository
+    log_info "Adding Docker CE repository..."
+    dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+    
+    # Install Docker
+    log_info "Installing Docker CE..."
+    dnf install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    
+    log_info "✓ Docker installed successfully"
+else
+    log_info "✓ Docker is already installed"
+    docker --version
+fi
 echo ""
 
 # Step 1: Install required kernel modules
@@ -89,14 +126,26 @@ else
 fi
 echo ""
 
-# Step 4: Stop Docker
-log_step "Step 4: Stopping Docker services..."
+# Step 4: Add dev user to docker group
+log_step "Step 4: Configuring user permissions..."
+if id "dev" &>/dev/null; then
+    log_info "Adding 'dev' user to docker group..."
+    usermod -aG docker dev
+    log_info "✓ User 'dev' added to docker group"
+    log_info "Note: User needs to log out and back in for group changes to take effect"
+else
+    log_warn "User 'dev' not found - skipping user configuration"
+fi
+echo ""
+
+# Step 5: Stop Docker
+log_step "Step 5: Stopping Docker services..."
 systemctl stop docker 2>/dev/null || log_info "Docker was not running"
 systemctl stop docker.socket 2>/dev/null || true
 echo ""
 
-# Step 5: Reload systemd and start Docker
-log_step "Step 5: Starting Docker..."
+# Step 6: Reload systemd and start Docker
+log_step "Step 6: Starting Docker..."
 systemctl daemon-reload
 systemctl start docker
 
@@ -113,8 +162,8 @@ else
 fi
 echo ""
 
-# Step 6: Test Docker
-log_step "Step 6: Testing Docker..."
+# Step 7: Test Docker
+log_step "Step 7: Testing Docker..."
 log_info "Running hello-world container..."
 if docker run --rm hello-world > /dev/null 2>&1; then
     log_info "✓ Docker is working correctly!"
@@ -123,31 +172,35 @@ else
 fi
 echo ""
 
-# Step 7: Display Docker info
-log_step "Step 7: Docker information..."
+# Step 8: Display Docker info
+log_step "Step 8: Docker information..."
 docker version | head -15
 echo ""
 docker info | head -20
 echo ""
 
 log_info "============================================"
-log_info "Docker Fix Complete!"
+log_info "Docker Installation and Fix Complete!"
 log_info "============================================"
 log_info ""
 log_info "Docker Status:"
 systemctl status docker --no-pager | head -10
 echo ""
 log_info "Configuration Applied:"
+log_info "  ✓ Docker CE: Installed (if needed)"
+log_info "  ✓ User 'dev': Added to docker group"
 log_info "  ✓ Kernel modules: xt_addrtype, br_netfilter, overlay"
 log_info "  ✓ Storage driver: overlay2"
 log_info "  ✓ Cgroup driver: systemd"
 log_info "  ✓ Firewall: Configured"
 echo ""
+log_info "IMPORTANT: User 'dev' must log out and back in for docker group to take effect!"
+echo ""
 log_info "Useful Commands:"
 log_info "  Status:  systemctl status docker"
 log_info "  Logs:    journalctl -u docker -f"
 log_info "  Restart: systemctl restart docker"
-log_info "  Test:    docker run hello-world"
+log_info "  Test (as dev): docker run hello-world"
 log_info "============================================"
 
 # Made with Bob

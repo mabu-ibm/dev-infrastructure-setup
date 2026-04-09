@@ -14,23 +14,89 @@ This guide will help you set up a complete CI/CD infrastructure with two AlmaLin
 - Root/sudo access on both hosts
 - Internet connectivity
 - Basic knowledge of Linux, Git, and Docker
+- A development machine (MacBook or Linux workstation)
 
 ## 30-Minute Setup
 
+### Step 0: Install Git on AlmaLinux Hosts (2 minutes)
+
+**On both almabuild and almak3s hosts**, install Git:
+
+```bash
+# SSH to almabuild
+ssh dev@almabuild
+sudo dnf install -y git
+git --version
+
+# SSH to almak3s
+ssh dev@almak3s
+sudo dnf install -y git
+git --version
+```
+
+Verify Git is installed:
+```bash
+git --version
+# Should show: git version 2.x.x
+```
+
+### Step 1: Setup Passwordless SSH Access (5 minutes)
+
+**From your development machine**, set up passwordless SSH access to both AlmaLinux hosts:
+
+```bash
+# On your dev machine (MacBook/Linux)
+cd /path/to/dev-infrastructure-setup
+
+# Setup SSH access to almabuild
+./vm-setup/setup-ssh-passwordless.sh dev@almabuild
+
+# Setup SSH access to almak3s
+./vm-setup/setup-ssh-passwordless.sh dev@almak3s
+```
+
+This will:
+- Generate SSH keys if needed
+- Copy your public key to the remote hosts
+- Configure SSH for passwordless access
+
+Verify access:
+```bash
+# Should connect without password
+ssh dev@almabuild
+ssh dev@almak3s
+```
+
 ### Part 1: almabuild Setup (15 minutes)
 
-#### 1. Install Docker (3 minutes)
+#### 2. Install Docker (3 minutes)
+
+**On almabuild host** (via SSH from dev machine):
+```bash
+ssh dev@almabuild
+cd /path/to/dev-infrastructure-setup
+sudo ./vm-setup/fix-docker-almalinux.sh
+```
+
+**IMPORTANT**: After installation completes, log out and back in for docker group permissions:
+```bash
+exit  # Log out
+ssh dev@almabuild  # Log back in
 ```bash
 cd /path/to/dev-infrastructure-setup
 sudo ./vm-setup/fix-docker-almalinux.sh
 ```
 
-Wait for completion, then verify:
+Verify Docker works without sudo:
 ```bash
 docker run hello-world
 ```
 
-#### 2. Install Gitea (5 minutes)
+If you see "Hello from Docker!", you're ready to proceed!
+
+#### 3. Install Gitea (5 minutes)
+
+**Still on almabuild**:
 ```bash
 sudo ./vm-setup/install-gitea-almalinux.sh
 ```
@@ -80,7 +146,10 @@ sudo systemctl start gitea-runner
 ### Part 2: almak3s Setup (15 minutes)
 
 #### 1. Install K3s (10 minutes)
+
+**On almak3s host** (via SSH from dev machine):
 ```bash
+ssh dev@almak3s
 cd /path/to/dev-infrastructure-setup
 sudo ./k8s-setup/install-k3s-almalinux.sh
 ```
@@ -356,7 +425,10 @@ If you encounter issues:
 
 ## Success Checklist
 
+- [ ] Passwordless SSH access from dev machine to almabuild
+- [ ] Passwordless SSH access from dev machine to almak3s
 - [ ] Docker running on almabuild
+- [ ] Dev user can run `docker run hello-world` without sudo
 - [ ] Gitea accessible at http://almabuild:3000
 - [ ] Gitea admin account created
 - [ ] Actions runner registered and idle
