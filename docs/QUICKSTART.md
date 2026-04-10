@@ -194,15 +194,36 @@ almak3s   Ready    control-plane,master   1m    v1.28.x+k3s1
 1. Log into Gitea: `http://almabuild:3000`
 2. Click **"+"** → **"New Repository"**
 3. Name: `hello-world`
-4. Click **"Create Repository"**
+4. **IMPORTANT**: Check "Initialize repository (Adds .gitignore, License and README)"
+5. Click **"Create Repository"**
 
-### 2. Add Workflow File
+### 2. Clone and Setup Local Repository
 
-Clone the repository:
+Clone the repository to your local machine or almabuild:
 ```bash
+# Clone the repository
 git clone http://almabuild:3000/your-username/hello-world.git
 cd hello-world
+
+# Verify you're in a git repository
+git status
+# Should show: On branch main
 ```
+
+**If you see "fatal: not a git repository"**, initialize it:
+```bash
+# Initialize git repository
+git init
+git branch -M main
+
+# Add remote
+git remote add origin http://almabuild:3000/your-username/hello-world.git
+
+# Verify remote
+git remote -v
+```
+
+### 3. Add Workflow File
 
 Create workflow directory and file:
 ```bash
@@ -233,21 +254,64 @@ jobs:
 EOF
 ```
 
-### 3. Push and Watch
+### 4. Commit and Push to Gitea
 
+**Important**: Make sure you're in the repository directory:
 ```bash
-git add .gitea/
+# Verify you're in the right directory
+pwd
+# Should show: /path/to/hello-world
+
+# Check git status
+git status
+# Should show .gitea/workflows/build.yaml as untracked
+
+# Add the workflow file
+git add .gitea/workflows/build.yaml
+
+# Commit the changes
 git commit -m "Add CI workflow"
+
+# Push to Gitea
 git push origin main
 ```
 
-Watch the build:
+**If push fails with authentication error**, configure Git credentials:
+```bash
+# Set your Gitea username and email
+git config user.name "your-username"
+git config user.email "your-email@example.com"
+
+# Push again (will prompt for password)
+git push origin main
+```
+
+**Alternative: Use SSH instead of HTTP**
+```bash
+# Generate SSH key if you don't have one
+ssh-keygen -t ed25519 -C "your-email@example.com"
+
+# Copy public key
+cat ~/.ssh/id_ed25519.pub
+
+# Add to Gitea: Settings → SSH/GPG Keys → Add Key
+
+# Change remote to SSH
+git remote set-url origin git@almabuild:your-username/hello-world.git
+
+# Push
+git push origin main
+```
+
+### 5. Watch the Build
+
+Watch the build in Gitea:
 1. Go to repository in Gitea
 2. Click **"Actions"** tab
 3. See your workflow running
 4. Click on the run to see logs
 
-### 4. Deploy to K3s
+### 6. Deploy to K3s
 
 Create a simple deployment:
 ```bash
