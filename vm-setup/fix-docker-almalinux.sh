@@ -126,15 +126,36 @@ else
 fi
 echo ""
 
-# Step 4: Add dev user to docker group
+# Step 4: Create docker group and add current user
 log_step "Step 4: Configuring user permissions..."
-if id "dev" &>/dev/null; then
-    log_info "Adding 'dev' user to docker group..."
+
+# Create docker group if it doesn't exist
+if ! getent group docker > /dev/null 2>&1; then
+    log_info "Creating docker group..."
+    groupadd docker
+    log_info "✓ Docker group created"
+else
+    log_info "✓ Docker group already exists"
+fi
+
+# Get the user who ran sudo (not root)
+ACTUAL_USER="${SUDO_USER:-$USER}"
+if [ "$ACTUAL_USER" = "root" ]; then
+    log_warn "Running as root directly - no user to add to docker group"
+    log_info "To add a user later: sudo usermod -aG docker USERNAME"
+else
+    log_info "Adding user '$ACTUAL_USER' to docker group..."
+    usermod -aG docker "$ACTUAL_USER"
+    log_info "✓ User '$ACTUAL_USER' added to docker group"
+    log_info "Note: User needs to log out and back in for group changes to take effect"
+    log_info "Or run: newgrp docker"
+fi
+
+# Also add 'dev' user if it exists (for compatibility)
+if id "dev" &>/dev/null && [ "$ACTUAL_USER" != "dev" ]; then
+    log_info "Also adding 'dev' user to docker group..."
     usermod -aG docker dev
     log_info "✓ User 'dev' added to docker group"
-    log_info "Note: User needs to log out and back in for group changes to take effect"
-else
-    log_warn "User 'dev' not found - skipping user configuration"
 fi
 echo ""
 
@@ -188,19 +209,24 @@ systemctl status docker --no-pager | head -10
 echo ""
 log_info "Configuration Applied:"
 log_info "  ✓ Docker CE: Installed (if needed)"
-log_info "  ✓ User 'dev': Added to docker group"
+log_info "  ✓ Docker group: Created (if needed)"
+log_info "  ✓ Current user: Added to docker group"
 log_info "  ✓ Kernel modules: xt_addrtype, br_netfilter, overlay"
 log_info "  ✓ Storage driver: overlay2"
 log_info "  ✓ Cgroup driver: systemd"
 log_info "  ✓ Firewall: Configured"
 echo ""
-log_info "IMPORTANT: User 'dev' must log out and back in for docker group to take effect!"
+if [ "$ACTUAL_USER" != "root" ]; then
+    log_info "IMPORTANT: User '$ACTUAL_USER' must log out and back in for docker group to take effect!"
+    log_info "Or run: newgrp docker"
+fi
 echo ""
 log_info "Useful Commands:"
 log_info "  Status:  systemctl status docker"
 log_info "  Logs:    journalctl -u docker -f"
 log_info "  Restart: systemctl restart docker"
-log_info "  Test (as dev): docker run hello-world"
+log_info "  Test:    docker run hello-world"
+log_info "  Groups:  groups \$USER"
 log_info "============================================"
 
 # Made with Bob
