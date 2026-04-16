@@ -1,7 +1,7 @@
 #!/bin/bash
 ################################################################################
-# Gitea Actions Runner Setup Script for AlmaLinux 10
-# Purpose: Install and configure Gitea Actions runner for CI/CD
+# Gitea Actions Runner Setup Script for AlmaLinux 10 (Container Mode)
+# Purpose: Install and configure Gitea Actions runner running in Docker container
 # Usage: sudo ./setup-gitea-actions-runner.sh
 ################################################################################
 
@@ -23,38 +23,33 @@ if [[ $EUID -ne 0 ]]; then
    exit 1
 fi
 
-log_info "Setting up Gitea Actions Runner..."
+log_info "Setting up Gitea Actions Runner (Container Mode)..."
 
 # Configuration
-RUNNER_VERSION="0.2.6"
-RUNNER_USER="gitea-runner"
-RUNNER_HOME="/var/lib/gitea-runner"
-RUNNER_CONFIG="${RUNNER_HOME}/config.yaml"
+RUNNER_IMAGE="gitea/act_runner:latest"
+RUNNER_CONTAINER="gitea-runner"
+RUNNER_DATA_DIR="/var/lib/gitea-runner"
 
-# Step 1: Create runner user
-log_info "Creating runner user..."
-if ! id -u ${RUNNER_USER} > /dev/null 2>&1; then
-    useradd --system --shell /bin/bash --create-home --home ${RUNNER_HOME} ${RUNNER_USER}
-    usermod -aG docker ${RUNNER_USER}
-    log_info "User ${RUNNER_USER} created and added to docker group"
-else
-    log_warn "User ${RUNNER_USER} already exists"
-    usermod -aG docker ${RUNNER_USER}
+# Step 1: Check Docker is installed and running
+log_info "Checking Docker installation..."
+if ! command -v docker &> /dev/null; then
+    log_error "Docker is not installed. Please install Docker first."
+    exit 1
 fi
 
-# Step 2: Download act_runner binary
-log_info "Downloading act_runner ${RUNNER_VERSION}..."
-wget -O /usr/local/bin/act_runner https://dl.gitea.com/act_runner/${RUNNER_VERSION}/act_runner-${RUNNER_VERSION}-linux-amd64
-chmod +x /usr/local/bin/act_runner
-log_info "act_runner binary installed"
+if ! systemctl is-active --quiet docker; then
+    log_error "Docker service is not running. Starting Docker..."
+    systemctl start docker
+fi
 
-# Step 3: Create runner home directory
-log_info "Creating runner home directory..."
-mkdir -p ${RUNNER_HOME}
-chown -R ${RUNNER_USER}:${RUNNER_USER} ${RUNNER_HOME}
-log_info "✓ Runner home directory created: ${RUNNER_HOME}"
+log_info "✓ Docker is installed and running"
 
-# Step 4: Get Gitea configuration
+# Step 2: Create runner data directory
+log_info "Creating runner data directory..."
+mkdir -p ${RUNNER_DATA_DIR}
+log_info "✓ Runner data directory created: ${RUNNER_DATA_DIR}"
+
+# Step 3: Get Gitea configuration
 log_info ""
 log_info "Gitea Configuration"
 log_info "==================="
@@ -84,16 +79,33 @@ log_info ""
 log_info "Configuration Summary:"
 log_info "  Gitea URL: ${GITEA_URL}"
 log_info "  Runner name: ${RUNNER_NAME}"
-log_info "  Runner home: ${RUNNER_HOME}"
+log_info "  Runner data: ${RUNNER_DATA_DIR}"
+log_info "  Container: ${RUNNER_CONTAINER}"
 log_info ""
 
-# Step 5: Register the runner
+# Step 4: Stop and remove existing container if it exists
+log_info "Checking for existing runner container..."
+if docker ps -a --format '{{.Names}}' | grep -q "^${RUNNER_CONTAINER}$"; then
+    log_warn "Existing container found. Removing..."
+    docker stop ${RUNNER_CONTAINER} 2>/dev/null || true
+    docker rm ${RUNNER_CONTAINER} 2>/dev/null || true
+    log_info "✓ Old container removed"
+fi
+
+# Step 5: Pull the latest runner image
+log_info "Pulling Gitea runner image..."
+docker pull ${RUNNER_IMAGE}
+log_info "✓ Runner image pulled"
+
+# Step 6: Register the runner using a temporary container
 log_info "Registering runner with Gitea..."
-sudo -u ${RUNNER_USER} bash -c "cd ${RUNNER_HOME} && /usr/local/bin/act_runner register \
-  --instance ${GITEA_URL} \
-  --token ${GITEA_TOKEN} \
-  --name ${RUNNER_NAME} \
-  --labels ubuntu-latest,almalinux-latest"
+docker run --rm \
+  -v ${RUNNER_DATA_DIR}:/data \
+  -e GITEA_INSTANCE_URL="${GITEA_URL}" \
+  -e GITEA_RUNNER_REGISTRATION_TOKEN="${GITEA_TOKEN}" \
+  -e GITEA_RUNNER_NAME="${RUNNER_NAME}" \
+  -e GITEA_RUNNER_LABELS="ubuntu-latest:docker://node:16-bullseye,ubuntu-22.04:docker://node:16-bullseye,ubuntu-20.04:docker://node:16-bullseye" \
+  ${RUNNER_IMAGE} register --no-interactive
 
 if [ $? -ne 0 ]; then
     log_error "Runner registration failed!"
@@ -102,34 +114,29 @@ fi
 
 log_info "✓ Runner registered successfully"
 
-# Step 6: Generate configuration
-log_info "Generating runner configuration..."
-sudo -u ${RUNNER_USER} bash -c "cd ${RUNNER_HOME} && /usr/local/bin/act_runner generate-config > ${RUNNER_CONFIG}"
-
-if [ ! -f "${RUNNER_CONFIG}" ]; then
-    log_error "Failed to generate config file!"
-    exit 1
-fi
-
-chown ${RUNNER_USER}:${RUNNER_USER} ${RUNNER_CONFIG}
-log_info "✓ Configuration generated: ${RUNNER_CONFIG}"
-
-# Step 7: Create systemd service
-log_info "Creating systemd service..."
+# Step 7: Create systemd service for the container
+log_info "Creating systemd service for container..."
 cat > /etc/systemd/system/gitea-runner.service <<EOF
 [Unit]
-Description=Gitea Actions Runner
+Description=Gitea Actions Runner (Container)
 After=docker.service
 Requires=docker.service
 
 [Service]
 Type=simple
-User=${RUNNER_USER}
-Group=${RUNNER_USER}
-WorkingDirectory=${RUNNER_HOME}
-ExecStart=/usr/local/bin/act_runner daemon -c ${RUNNER_CONFIG}
 Restart=always
 RestartSec=10
+TimeoutStartSec=0
+ExecStartPre=-/usr/bin/docker stop ${RUNNER_CONTAINER}
+ExecStartPre=-/usr/bin/docker rm ${RUNNER_CONTAINER}
+ExecStart=/usr/bin/docker run --rm \\
+  --name ${RUNNER_CONTAINER} \\
+  -v ${RUNNER_DATA_DIR}:/data \\
+  -v /var/run/docker.sock:/var/run/docker.sock \\
+  -e GITEA_INSTANCE_URL="${GITEA_URL}" \\
+  -e GITEA_RUNNER_NAME="${RUNNER_NAME}" \\
+  ${RUNNER_IMAGE}
+ExecStop=/usr/bin/docker stop ${RUNNER_CONTAINER}
 
 [Install]
 WantedBy=multi-user.target
@@ -143,14 +150,24 @@ log_info "Enabling and starting gitea-runner service..."
 systemctl enable gitea-runner
 systemctl start gitea-runner
 
-sleep 3
+sleep 5
 
 if systemctl is-active --quiet gitea-runner; then
     log_info "✓ Service started successfully"
 else
     log_error "Service failed to start"
     log_info "Checking logs..."
-    journalctl -u gitea-runner -n 20 --no-pager
+    journalctl -u gitea-runner -n 30 --no-pager
+    exit 1
+fi
+
+# Step 9: Verify container is running
+log_info "Verifying container status..."
+if docker ps --format '{{.Names}}' | grep -q "^${RUNNER_CONTAINER}$"; then
+    log_info "✓ Container is running"
+else
+    log_error "Container is not running"
+    docker logs ${RUNNER_CONTAINER} 2>&1 | tail -20
     exit 1
 fi
 
@@ -160,19 +177,26 @@ log_info "Gitea Actions Runner Setup Complete!"
 log_info "============================================"
 log_info ""
 log_info "Configuration Summary:"
+log_info "  Mode: Container-based runner"
 log_info "  Gitea URL: ${GITEA_URL}"
 log_info "  Runner name: ${RUNNER_NAME}"
-log_info "  Runner home: ${RUNNER_HOME}"
-log_info "  Config file: ${RUNNER_CONFIG}"
+log_info "  Container: ${RUNNER_CONTAINER}"
+log_info "  Data directory: ${RUNNER_DATA_DIR}"
+log_info "  Image: ${RUNNER_IMAGE}"
 log_info "  Service: gitea-runner.service"
 log_info ""
 log_info "Service Status:"
 systemctl status gitea-runner --no-pager | head -15
 log_info ""
+log_info "Container Status:"
+docker ps --filter "name=${RUNNER_CONTAINER}" --format "table {{.Names}}\t{{.Status}}\t{{.Image}}"
+log_info ""
 log_info "Useful Commands:"
-log_info "  Check status: systemctl status gitea-runner"
-log_info "  View logs:    journalctl -u gitea-runner -f"
-log_info "  Restart:      systemctl restart gitea-runner"
+log_info "  Check service:    systemctl status gitea-runner"
+log_info "  View logs:        journalctl -u gitea-runner -f"
+log_info "  Container logs:   docker logs -f ${RUNNER_CONTAINER}"
+log_info "  Restart service:  systemctl restart gitea-runner"
+log_info "  Stop container:   docker stop ${RUNNER_CONTAINER}"
 log_info ""
 log_info "Check the runner in Gitea UI:"
 log_info "  ${GITEA_URL}/admin/actions/runners"
