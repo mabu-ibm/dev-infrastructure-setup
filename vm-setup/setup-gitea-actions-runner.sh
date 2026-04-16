@@ -100,7 +100,9 @@ log_info "✓ Runner image pulled"
 # Step 6: Register the runner using a temporary container
 log_info "Registering runner with Gitea..."
 docker run --rm \
+  --network host \
   -v ${RUNNER_DATA_DIR}:/data \
+  -v /var/run/docker.sock:/var/run/docker.sock \
   -e GITEA_INSTANCE_URL="${GITEA_URL}" \
   -e GITEA_RUNNER_REGISTRATION_TOKEN="${GITEA_TOKEN}" \
   -e GITEA_RUNNER_NAME="${RUNNER_NAME}" \
@@ -131,6 +133,7 @@ ExecStartPre=-/usr/bin/docker stop ${RUNNER_CONTAINER}
 ExecStartPre=-/usr/bin/docker rm ${RUNNER_CONTAINER}
 ExecStart=/usr/bin/docker run --rm \\
   --name ${RUNNER_CONTAINER} \\
+  --network host \\
   -v ${RUNNER_DATA_DIR}:/data \\
   -v /var/run/docker.sock:/var/run/docker.sock \\
   -e GITEA_INSTANCE_URL="${GITEA_URL}" \\
