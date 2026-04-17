@@ -85,7 +85,7 @@ chmod +x /tmp/gitea
 mv /tmp/gitea /usr/local/bin/gitea
 
 log_info "✓ Gitea ${GITEA_VERSION} installed"
-gitea --version
+/usr/local/bin/gitea --version
 echo ""
 
 # Step 4: Create Gitea directories
