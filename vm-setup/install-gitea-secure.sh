@@ -38,6 +38,21 @@ GITEA_PORT=${GITEA_PORT:-3000}
 read -p "Enter HTTPS port [443]: " HTTPS_PORT
 HTTPS_PORT=${HTTPS_PORT:-443}
 
+# Validate HTTPS port
+if [ "$HTTPS_PORT" != "443" ]; then
+    log_warn "⚠️  WARNING: You entered port $HTTPS_PORT instead of standard HTTPS port 443"
+    log_warn "This means you'll need to access Gitea as: https://$DOMAIN:$HTTPS_PORT"
+    log_warn "Standard HTTPS (port 443) doesn't require :port in the URL"
+    echo ""
+    read -p "Do you want to use standard port 443 instead? (Y/n): " USE_STANDARD
+    if [[ "$USE_STANDARD" =~ ^[Yy]?$ ]] || [ -z "$USE_STANDARD" ]; then
+        HTTPS_PORT=443
+        log_info "✓ Using standard HTTPS port 443"
+    else
+        log_info "Using custom port $HTTPS_PORT as requested"
+    fi
+fi
+
 if [ -z "$DOMAIN" ] || [ -z "$EMAIL" ]; then
     log_error "Domain and email are required!"
     exit 1

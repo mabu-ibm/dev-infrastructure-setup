@@ -37,6 +37,43 @@ read -p "Enter Gitea HTTP port [3000]: " GITEA_PORT
 GITEA_PORT=${GITEA_PORT:-3000}
 read -p "Enter HTTPS port [443]: " HTTPS_PORT
 HTTPS_PORT=${HTTPS_PORT:-443}
+
+# Validate HTTPS port
+if [ "$HTTPS_PORT" != "443" ]; then
+    log_warn "⚠️  WARNING: You entered port $HTTPS_PORT instead of standard HTTPS port 443"
+    log_warn "This means you'll need to access Gitea as: https://$DOMAIN:$HTTPS_PORT"
+    log_warn "Standard HTTPS (port 443) doesn't require :port in the URL"
+    echo ""
+    read -p "Do you want to use standard port 443 instead? (Y/n): " USE_STANDARD
+    if [[ "$USE_STANDARD" =~ ^[Yy]?$ ]] || [ -z "$USE_STANDARD" ]; then
+        HTTPS_PORT=443
+        log_info "✓ Using standard HTTPS port 443"
+    else
+        log_info "Using custom port $HTTPS_PORT as requested"
+    fi
+fi
+
+# Ask about HTTP access
+echo ""
+log_info "HTTP Access Configuration"
+log_info "========================="
+log_info "By default, Gitea will only be accessible via HTTPS (secure)"
+log_info "You can optionally enable direct HTTP access on port $GITEA_PORT"
+echo ""
+read -p "Enable HTTP access on port $GITEA_PORT? (y/N): " ENABLE_HTTP
+ENABLE_HTTP=${ENABLE_HTTP:-N}
+
+if [[ "$ENABLE_HTTP" =~ ^[Yy]$ ]]; then
+    ENABLE_HTTP_ACCESS="yes"
+    HTTP_ADDR="0.0.0.0"
+    log_info "✓ HTTP access will be enabled on all interfaces (0.0.0.0:$GITEA_PORT)"
+    log_warn "⚠️  Note: HTTP traffic is unencrypted. Use HTTPS for sensitive data."
+else
+    ENABLE_HTTP_ACCESS="no"
+    HTTP_ADDR="127.0.0.1"
+    log_info "✓ HTTP access disabled (HTTPS only via reverse proxy)"
+fi
+
 read -p "Certificate validity in days [3650 = 10 years]: " CERT_DAYS
 CERT_DAYS=${CERT_DAYS:-3650}
 
@@ -48,10 +85,14 @@ fi
 log_info ""
 log_info "Configuration Summary:"
 log_info "  Domain: $DOMAIN"
-log_info "  Gitea Port: $GITEA_PORT (internal)"
+log_info "  Gitea Port: $GITEA_PORT (internal, listening on $HTTP_ADDR)"
 log_info "  HTTPS Port: $HTTPS_PORT (external)"
+log_info "  HTTP Access: $ENABLE_HTTP_ACCESS"
+if [[ "$ENABLE_HTTP_ACCESS" == "yes" ]]; then
+    log_info "  HTTP URL: http://$DOMAIN:$GITEA_PORT (unencrypted)"
+fi
+log_info "  HTTPS URL: https://$DOMAIN"
 log_info "  Certificate Validity: $CERT_DAYS days"
-log_info "  URL: https://$DOMAIN"
 log_info ""
 log_warn "Note: Self-signed certificates will show browser warnings"
 log_info "This is normal and expected for local/lab environments"
@@ -148,7 +189,7 @@ RUN_USER = git
 PROTOCOL = http
 DOMAIN = $DOMAIN
 ROOT_URL = https://$DOMAIN/
-HTTP_ADDR = 127.0.0.1
+HTTP_ADDR = $HTTP_ADDR
 HTTP_PORT = $GITEA_PORT
 DISABLE_SSH = false
 SSH_PORT = 22
@@ -228,7 +269,59 @@ echo ""
 
 # Step 8: Configure Nginx as reverse proxy
 log_step "8. Configuring Nginx for HTTPS..."
-cat > /etc/nginx/conf.d/gitea.conf <<EOF
+
+if [[ "$ENABLE_HTTP_ACCESS" == "yes" ]]; then
+    log_info "Configuring Nginx with HTTP and HTTPS access..."
+    cat > /etc/nginx/conf.d/gitea.conf <<EOF
+# HTTP server (direct access, no redirect)
+server {
+    listen 80;
+    listen [::]:80;
+    server_name $DOMAIN;
+    
+    # Logging
+    access_log /var/log/nginx/gitea-http-access.log;
+    error_log /var/log/nginx/gitea-http-error.log;
+    
+    # Proxy settings
+    location / {
+        proxy_pass http://127.0.0.1:$GITEA_PORT;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header X-Forwarded-Host \$host;
+        proxy_set_header X-Forwarded-Port \$server_port;
+        
+        # WebSocket support
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        
+        # Timeouts
+        proxy_connect_timeout 600;
+        proxy_send_timeout 600;
+        proxy_read_timeout 600;
+        send_timeout 600;
+        
+        # Buffer settings
+        proxy_buffering off;
+        proxy_request_buffering off;
+    }
+    
+    # Increase max body size for large repos
+    client_max_body_size 512M;
+}
+
+# HTTPS server
+server {
+    listen $HTTPS_PORT ssl http2;
+    listen [::]:$HTTPS_PORT ssl http2;
+    server_name $DOMAIN;
+EOF
+else
+    log_info "Configuring Nginx with HTTPS only (HTTP redirects to HTTPS)..."
+    cat > /etc/nginx/conf.d/gitea.conf <<EOF
 # Redirect HTTP to HTTPS
 server {
     listen 80;
@@ -243,6 +336,10 @@ server {
     listen $HTTPS_PORT ssl http2;
     listen [::]:$HTTPS_PORT ssl http2;
     server_name $DOMAIN;
+EOF
+fi
+
+cat >> /etc/nginx/conf.d/gitea.conf <<EOF
     
     # SSL certificate
     ssl_certificate /etc/nginx/ssl/gitea.crt;
@@ -312,6 +409,13 @@ if command -v firewall-cmd &> /dev/null; then
     firewall-cmd --permanent --add-service=http
     firewall-cmd --permanent --add-service=https
     firewall-cmd --permanent --add-port=22/tcp
+    
+    # Open Gitea HTTP port if direct HTTP access is enabled
+    if [[ "$ENABLE_HTTP_ACCESS" == "yes" ]]; then
+        firewall-cmd --permanent --add-port=$GITEA_PORT/tcp
+        log_info "✓ Opened port $GITEA_PORT for direct HTTP access"
+    fi
+    
     firewall-cmd --reload
     log_info "✓ Firewall configured"
 else
@@ -359,12 +463,69 @@ else
 fi
 echo ""
 
+# Step 12: Verify and auto-fix installation
+log_step "12. Verifying installation and auto-fixing issues..."
+echo ""
+
+# Check if Nginx is listening on the correct port
+log_info "Checking if Nginx is listening on port $HTTPS_PORT..."
+sleep 3
+if ss -tlnp | grep -q ":$HTTPS_PORT"; then
+    log_info "✓ Nginx is listening on port $HTTPS_PORT"
+else
+    log_error "✗ Nginx is NOT listening on port $HTTPS_PORT"
+    log_info "Attempting to fix..."
+    
+    # Check what port Nginx is actually on
+    ACTUAL_PORT=$(ss -tlnp | grep nginx | grep -oP ':\K[0-9]+' | head -1)
+    if [ -n "$ACTUAL_PORT" ] && [ "$ACTUAL_PORT" != "$HTTPS_PORT" ]; then
+        log_warn "Nginx is listening on port $ACTUAL_PORT instead of $HTTPS_PORT"
+        log_info "Fixing Nginx configuration..."
+        
+        # Fix the port in config
+        sed -i "s/listen $ACTUAL_PORT/listen $HTTPS_PORT/g" /etc/nginx/conf.d/gitea.conf
+        sed -i "s/listen \[::]:$ACTUAL_PORT/listen [::]:$HTTPS_PORT/g" /etc/nginx/conf.d/gitea.conf
+        
+        # Restart Nginx
+        systemctl restart nginx
+        sleep 3
+        
+        if ss -tlnp | grep -q ":$HTTPS_PORT"; then
+            log_info "✓ Fixed! Nginx now listening on port $HTTPS_PORT"
+        else
+            log_error "Could not fix Nginx port automatically"
+        fi
+    fi
+fi
+
+# Check if Gitea is accessible locally
+log_info "Checking if Gitea is accessible..."
+if curl -s -o /dev/null -w "%{http_code}" http://localhost:$GITEA_PORT | grep -q "200\|301\|302"; then
+    log_info "✓ Gitea is accessible on localhost:$GITEA_PORT"
+else
+    log_warn "Gitea may not be fully started yet"
+fi
+
+# Check if HTTPS is working
+log_info "Checking HTTPS access..."
+if curl -k -s -o /dev/null -w "%{http_code}" https://localhost:$HTTPS_PORT | grep -q "200\|301\|302"; then
+    log_info "✓ HTTPS is working on port $HTTPS_PORT"
+else
+    log_warn "HTTPS may not be fully configured yet"
+fi
+
+echo ""
 log_info "============================================"
 log_info "Gitea Secure Installation Complete!"
 log_info "============================================"
 echo ""
 log_info "Access Gitea:"
-log_info "  URL: https://$DOMAIN"
+log_info "  HTTPS URL: https://$DOMAIN"
+if [[ "$ENABLE_HTTP_ACCESS" == "yes" ]]; then
+    log_info "  HTTP URL:  http://$DOMAIN:$GITEA_PORT (unencrypted)"
+    log_warn "  ⚠️  HTTP traffic is unencrypted - use HTTPS for sensitive data"
+fi
+log_info ""
 log_info "  Complete the installation wizard in your browser"
 echo ""
 log_warn "⚠️  IMPORTANT: Browser Security Warning"
