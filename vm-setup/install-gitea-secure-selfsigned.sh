@@ -89,6 +89,12 @@ wget -O /tmp/gitea "$GITEA_URL"
 chmod +x /tmp/gitea
 mv /tmp/gitea /usr/local/bin/gitea
 
+# Set SELinux context if SELinux is enabled
+if command -v getenforce &> /dev/null && [ "$(getenforce)" != "Disabled" ]; then
+    chcon -t bin_t /usr/local/bin/gitea 2>/dev/null || true
+    restorecon -v /usr/local/bin/gitea 2>/dev/null || true
+fi
+
 log_info "✓ Gitea ${GITEA_VERSION} installed"
 /usr/local/bin/gitea --version
 echo ""
