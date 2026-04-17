@@ -230,7 +230,16 @@ log_info "✓ Directory structure created"
 # Step 10: Download Gitea binary
 log_step "Step 10: Downloading Gitea ${GITEA_VERSION}..."
 wget -O /usr/local/bin/gitea https://dl.gitea.com/gitea/${GITEA_VERSION}/gitea-${GITEA_VERSION}-linux-amd64
-chmod +x /usr/local/bin/gitea
+chmod 755 /usr/local/bin/gitea
+chown ${GITEA_USER}:${GITEA_USER} /usr/local/bin/gitea
+
+# Fix SELinux context for AlmaLinux
+if command -v chcon &> /dev/null; then
+    log_info "Setting SELinux context for Gitea binary..."
+    chcon -t bin_t /usr/local/bin/gitea || log_warn "Failed to set SELinux context"
+    restorecon -v /usr/local/bin/gitea || log_warn "Failed to restore SELinux context"
+fi
+
 log_info "✓ Gitea binary installed"
 
 # Step 11: Create Gitea configuration
